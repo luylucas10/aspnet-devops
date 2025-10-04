@@ -161,7 +161,23 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-  
+
+      - name: Debug env & files
+        run: |
+          echo "REF_NAME=${{ github.ref_name }}"
+          echo "IMAGE_TAG (from semantic-release) = '${{ needs.semantic-release.outputs.IMAGE_TAG }}'"
+          echo "IMAGE_FULL = '${{ needs.semantic-release.outputs.IMAGE_FULL }}'"
+          echo "---- k8s/values.yaml BEFORE ----"
+          sed -n '1,200p' k8s/values.yaml || echo "(no file)"
+        shell: bash
+      
+      - name: Sync with remote branch (include commits from semantic-release)
+        run: |
+          git fetch origin +refs/heads/${{ github.ref_name }}:refs/remotes/origin/${{ github.ref_name }} --tags
+          git reset --hard origin/${{ github.ref_name }}
+        shell: bash
+      
+
       - name: Install PyYAML
         run: python -m pip install --upgrade pip PyYAML
   
