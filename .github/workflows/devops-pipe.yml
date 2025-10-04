@@ -1,4 +1,4 @@
-name: .NET + Build & Publish image + Update Helm
+name: Blazor Production Pipeline
 
 on:
   push:
@@ -6,162 +6,210 @@ on:
   pull_request:
     branches: [ "main" ]
 
-# precisamos de permissões para publicar packages e escrever no repo
+# Permissões necessárias
 permissions:
-  contents: write    # para poder commitar de volta
-  packages: write    # para publicar imagens no GHCR
+  contents: write    # permitir criar tags/commits
+  packages: write    # publicar imagens no GHCR
 
 env:
   IMAGE_REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}   # owner/org
-  IMAGE_NAME: ${{ github.event.repository.name }}  # por padrão uso o nome do repo
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}
+  IMAGE_NAME: ${{ github.event.repository.name }}
   K8S_VALUES: k8s/values.yaml
   CHART_FILE: k8s/Chart.yaml
 
 jobs:
-  build:
-
+  # ------------------------------
+  # 1) build + test
+  # ------------------------------
+  build-and-test:
     runs-on: ubuntu-latest
-
+    outputs:
+      # opcionalmente exportar artefatos, mas não precisamos da tag aqui
+      built: true
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        # necessário para fazer push com GITHUB_TOKEN depois
-        persist-credentials: true
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 9.0.x
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
 
-    - name: Restore dependencies
-      run: dotnet restore
+      - name: Restore dependencies
+        run: dotnet restore
 
-    - name: Build
-      run: dotnet build --no-restore
+      - name: Build
+        run: dotnet build --no-restore
 
-    - name: Test
-      run: dotnet test --no-build --verbosity normal
+      - name: Test
+        run: dotnet test --no-build --verbosity normal
 
-    # --- Buildx + login + build & push ---
-    - name: Set up QEMU (for buildx multiarch support)
-      uses: docker/setup-qemu-action@v3
+  # ------------------------------
+  # 2) semantic-release (gera tag vX.Y.Z)
+  # ------------------------------
+  semantic-release:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    outputs:
+      IMAGE_TAG: ${{ steps.get_tag.outputs.IMAGE_TAG }}
+      IMAGE_FULL: ${{ steps.get_tag.outputs.IMAGE_FULL }}
+    steps:
+      - name: Checkout (full history & tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'    # ajuste se preferir outra versão LTS
 
-    - name: Log in to GHCR
-      uses: docker/login-action@v2
-      with:
-        registry: ${{ env.IMAGE_REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install semantic-release
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund semantic-release@^19
 
-    - name: Prepare image tags
-      id: tags
-      run: |
-        SHORT_SHA=${GITHUB_SHA::7}
-        IMAGE_TAG=${SHORT_SHA}
-        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
-        # também exponho a imagem completa como saída
-        echo "IMAGE_FULL=${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+      - name: Run semantic-release (determine version, create tag & GitHub release)
+        id: semrel
+        env:
+          # GITHUB_TOKEN geralmente funciona; se estiver usando PAT, troque aqui
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GIT_AUTHOR_IDENT optional, evita commits com email desconhecido
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "github-actions[bot]@users.noreply.github.com"
+        run: |
+          # semantic-release vai ler configuração default ou .releaserc
+          npx semantic-release --no-ci || (echo "semantic-release failed" && exit 1)
 
-    - name: Build and push image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: ./Dockerfile               # ajuste se Dockerfile estiver em outro local
-        push: true
-        platforms: linux/amd64
-        tags: |
-          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.IMAGE_TAG }}
-          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
-        build-args: |
-          DOTNET_ENV=Production
+      - name: Get latest tag created by semantic-release
+        id: get_tag
+        run: |
+          # pega a última tag anotada (ex: v1.2.3)
+          # fetch pode ser necessário para garantir tags locais
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0)
+          echo "LATEST_TAG=${LATEST_TAG}"
+          # remove leading 'v' para a tag da imagem (se preferir manter 'v' remova a linha abaixo)
+          IMAGE_TAG=${LATEST_TAG#v}
+          IMAGE_FULL=${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "IMAGE_FULL=$IMAGE_FULL" >> $GITHUB_OUTPUT
 
-    # --- Atualiza k8s/values.yaml e Chart.yaml ---
-    # Vamos instalar Python + pyyaml e modificar os dois YAMLs com um script pequeno.
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
+  # ------------------------------
+  # 3) build & push image (usa tag semver)
+  # ------------------------------
+  build-and-push-image:
+    needs: semantic-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for Docker context)
+        uses: actions/checkout@v4
 
-    - name: Install PyYAML
-      run: python -m pip install --upgrade pip PyYAML
+      - name: Set up QEMU (for buildx)
+        uses: docker/setup-qemu-action@v3
 
-    - name: Update Helm values.yaml and Chart.yaml with new image tag / appVersion
-      id: update_yaml
-      run: |
-        IMAGE_FULL="${{ steps.tags.outputs.IMAGE_FULL }}"
-        IMAGE_TAG="${{ steps.tags.outputs.IMAGE_TAG }}"
-        echo "Updating ${GITHUB_WORKSPACE}/${{ env.K8S_VALUES }} and $GITHUB_WORKSPACE/${{ env.CHART_FILE }}"
-        python - <<'PY'
-        import sys, yaml, pathlib
-        ws = pathlib.Path('.').resolve()
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.IMAGE_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image (tag semver + latest)
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ needs.semantic-release.outputs.IMAGE_FULL }}
+            ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            DOTNET_ENV=Production
+
+      - name: Echo image info
+        run: |
+          echo "Image pushed: ${{ needs.semantic-release.outputs.IMAGE_FULL }}"
+
+  # ------------------------------
+  # 4) Update Helm values & Chart and commit back
+  # ------------------------------
+  update-helm-and-commit:
+    needs: build-and-push-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with write perms)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pip PyYAML
+
+      - name: Update Helm values.yaml and Chart.yaml with new semver tag
+        id: update_yaml
+        run: |
+          IMAGE_TAG="${{ needs.semantic-release.outputs.IMAGE_TAG }}"
+          IMAGE_FULL="${{ needs.semantic-release.outputs.IMAGE_FULL }}"
+          echo "Updating ${K8S_VALUES} and ${CHART_FILE} -> ${IMAGE_TAG}"
+          python - <<'PY'
+          import yaml, pathlib
+          ws = pathlib.Path('.').resolve()
+          values_file = ws / "${{ env.K8S_VALUES }}"
+          chart_file = ws / "${{ env.CHART_FILE }}"
+          image_tag = "${{ needs.semantic-release.outputs.IMAGE_TAG }}"
+          image_full = "${{ needs.semantic-release.outputs.IMAGE_FULL }}"
+          
+          # Load values
+          vals = {}
+        if values_file.exists():
+          with open(values_file, 'r', encoding='utf-8') as f:
+            vals = yaml.safe_load(f) or {}
         
-        values_file = ws / "${{ env.K8S_VALUES }}"
-        chart_file = ws / "${{ env.CHART_FILE }}"
-        
-        image_tag = "${{ steps.tags.outputs.IMAGE_TAG }}"
-        image_full = "${{ steps.tags.outputs.IMAGE_FULL }}"
-        
-        # Load and update values.yaml
-        with open(values_file, 'r', encoding='utf-8') as f:
-            vals = yaml.safe_load(f)
-        
-        # Assumptions: valores comuns
-        #  - imagem pode estar em values under .image.repository / .image.tag
-        #  - ou em .image (map) with name/tag
-        # Tente vários padrões úteis:
-        def set_image(vals):
-            if vals is None:
-                vals = {}
-            # padrão helm comum: image: { repository: "...", tag: "..." }
-            img = vals.get('image')
-            if isinstance(img, dict):
-                # atualizar repository (mantendo formato) e tag
-                # se repository não existir, manter a imagem completa
-                if 'repository' in img:
-                    img['repository'] = image_full.rsplit(":",1)[0]
-                else:
-                    img['repository'] = image_full.rsplit(":",1)[0]
-                img['tag'] = image_tag
-            else:
-                # se image for string, substitui por full image (repository:tag)
-                vals['image'] = image_full
-            vals['image'] = img if isinstance(img, dict) else vals['image']
-            return vals
-        
-        vals = set_image(vals)
+        # Update image block
+          img = vals.get('image')
+        if isinstance(img, dict):
+          repo = image_full.rsplit(':', 1)[0]
+          img['repository'] = repo
+          img['tag'] = image_tag
+          vals['image'] = img
+        else:
+          # set as full image string
+          vals['image'] = image_full
         
         with open(values_file, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
+          yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
         
         # Update Chart.yaml appVersion
-        with open(chart_file, 'r', encoding='utf-8') as f:
-            chart = yaml.safe_load(f)
-        
-        if chart is None:
-            chart = {}
-        chart['appVersion'] = image_tag
-        
+          chart = {}
+        if chart_file.exists():
+          with open(chart_file, 'r', encoding='utf-8') as f:
+            chart = yaml.safe_load(f) or {}
+          chart['appVersion'] = image_tag
         with open(chart_file, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
-        
-        print("Updated values.yaml and Chart.yaml")
-        PY
+          yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
+          
+          print("Updated helm files")
+          PY
 
-    # --- Commit & push changes back to repo ---
-    - name: Commit and push updated helm files
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add "${{ env.K8S_VALUES }}" "${{ env.CHART_FILE }}" || true
-        # se não houver alteração, git diff --quiet retorna 0, evitamos erro
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "ci: publish image ${{ steps.tags.outputs.IMAGE_TAG }} and update Helm values"
-          git push origin HEAD:${{ github.ref_name }}
-        fi
+      - name: Commit and push updated helm files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ env.K8S_VALUES }}" "${{ env.CHART_FILE }}" || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(release): update Helm to ${IMAGE_TAG}"
+            git push origin HEAD:${{ github.ref_name }}
