@@ -143,6 +143,7 @@ jobs:
         run: |
           echo "Image pushed: ${{ needs.semantic-release.outputs.IMAGE_FULL }}"
 
+  
   # ------------------------------
   # 4) Update Helm values & Chart and commit back
   # ------------------------------
@@ -155,78 +156,43 @@ jobs:
         with:
           persist-credentials: true
           fetch-depth: 0
-
+  
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
+  
       - name: Install PyYAML
         run: python -m pip install --upgrade pip PyYAML
-
+  
+      - name: Ensure script is executable (optional)
+        run: |
+          ls -la scripts || true
+          chmod +x scripts/update_helm.py || true
+  
       - name: Update Helm values.yaml and Chart.yaml with new semver tag
         id: update_yaml
         run: |
           IMAGE_TAG="${{ needs.semantic-release.outputs.IMAGE_TAG }}"
           IMAGE_FULL="${{ needs.semantic-release.outputs.IMAGE_FULL }}"
           echo "Updating ${K8S_VALUES} and ${CHART_FILE} -> ${IMAGE_TAG}"
-          python - <<'PY'
-          import sys, yaml, pathlib
-          ws = pathlib.Path('.').resolve()
-          
-          values_file = ws / "${{ env.K8S_VALUES }}"
-          chart_file = ws / "${{ env.CHART_FILE }}"
-          
-          image_tag = "$${{ needs.semantic-release.outputs.IMAGE_TAG }}"
-          image_full = "${{ needs.semantic-release.outputs.IMAGE_FULL }}"
-          
-          # Load and update values.yaml
-          with open(values_file, 'r', encoding='utf-8') as f:
-            vals = yaml.safe_load(f)
-          
-          # Assumptions: valores comuns
-          #  - imagem pode estar em values under .image.repository / .image.tag
-          #  - ou em .image (map) with name/tag
-          # Tente vários padrões úteis:
-          def set_image(vals):
-            if vals is None:
-              vals = {}
-            # padrão helm comum: image: { repository: "...", tag: "..." }
-            img = vals.get('image')
-            if isinstance(img, dict):
-              # atualizar repository (mantendo formato) e tag
-              # se repository não existir, manter a imagem completa
-              if 'repository' in img:
-                img['repository'] = image_full.rsplit(":",1)[0]
-              else:
-                img['repository'] = image_full.rsplit(":",1)[0]
-              img['tag'] = image_tag
-            else:
-              # se image for string, substitui por full image (repository:tag)
-              vals['image'] = image_full
-            vals['image'] = img if isinstance(img, dict) else vals['image']
-            return vals
-          
-          vals = set_image(vals)
-          
-          with open(values_file, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
-          
-          # Update Chart.yaml appVersion
-          with open(chart_file, 'r', encoding='utf-8') as f:
-            chart = yaml.safe_load(f)
-          
-          if chart is None:
-            chart = {}
-          chart['appVersion'] = image_tag
-          
-          with open(chart_file, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
-          
-          print("Updated values.yaml and Chart.yaml")
-          PY
-
+          python scripts/update_helm.py \
+            --values "${{ env.K8S_VALUES }}" \
+            --chart "${{ env.CHART_FILE }}" \
+            --image-full "${IMAGE_FULL}" \
+            --image-tag "${IMAGE_TAG}"
+        shell: bash
+  
+      - name: Show resulting files (for debug)
+        run: |
+          echo "----- k8s/values.yaml -----"
+          sed -n '1,200p' "${{ env.K8S_VALUES }}" || true
+          echo "----- k8s/Chart.yaml -----"
+          sed -n '1,200p' "${{ env.CHART_FILE }}" || true
+  
       - name: Commit and push updated helm files
+        env:
+          IMAGE_TAG: "${{ needs.semantic-release.outputs.IMAGE_TAG }}"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -236,3 +202,5 @@ jobs:
           else
             git commit -m "chore(release): update Helm to ${IMAGE_TAG}"
             git push origin HEAD:${{ github.ref_name }}
+          fi
+        shell: bash
