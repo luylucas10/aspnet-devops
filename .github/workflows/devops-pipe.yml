@@ -173,35 +173,35 @@ jobs:
           
           # Load values
           vals = {}
-        if values_file.exists():
-          with open(values_file, 'r', encoding='utf-8') as f:
-            vals = yaml.safe_load(f) or {}
-        
-        # Update image block
-          img = vals.get('image')
-        if isinstance(img, dict):
-          repo = image_full.rsplit(':', 1)[0]
-          img['repository'] = repo
-          img['tag'] = image_tag
-          vals['image'] = img
-        else:
-          # set as full image string
-          vals['image'] = image_full
-        
-        with open(values_file, 'w', encoding='utf-8') as f:
-          yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
-        
-        # Update Chart.yaml appVersion
-          chart = {}
-        if chart_file.exists():
-          with open(chart_file, 'r', encoding='utf-8') as f:
-            chart = yaml.safe_load(f) or {}
-          chart['appVersion'] = image_tag
-        with open(chart_file, 'w', encoding='utf-8') as f:
-          yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
+          if values_file.exists():
+            with open(values_file, 'r', encoding='utf-8') as f:
+              vals = yaml.safe_load(f) or {}
           
-          print("Updated helm files")
-          PY
+          # Update image block
+            img = vals.get('image')
+          if isinstance(img, dict):
+            repo = image_full.rsplit(':', 1)[0]
+            img['repository'] = repo
+            img['tag'] = image_tag
+            vals['image'] = img
+          else:
+            # set as full image string
+            vals['image'] = image_full
+          
+          with open(values_file, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
+          
+          # Update Chart.yaml appVersion
+            chart = {}
+          if chart_file.exists():
+            with open(chart_file, 'r', encoding='utf-8') as f:
+              chart = yaml.safe_load(f) or {}
+            chart['appVersion'] = image_tag
+          with open(chart_file, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
+            
+            print("Updated helm files")
+            PY
 
       - name: Commit and push updated helm files
         run: |
