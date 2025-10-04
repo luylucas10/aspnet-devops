@@ -208,7 +208,7 @@ jobs:
             yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
             
             print("Updated helm files")
-            PY
+          PY
 
       - name: Commit and push updated helm files
         run: |
