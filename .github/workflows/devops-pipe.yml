@@ -67,8 +67,15 @@ jobs:
         with:
           node-version: '22'    # ajuste se preferir outra versão LTS
 
-      - name: Install semantic-release
-        run: npm install --no-audit --no-fund semantic-release@^19
+      - name: Install semantic-release + plugins
+        run: |
+          npm install --no-audit --no-fund \
+            semantic-release@^19 \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            @semantic-release/github
 
       - name: Run semantic-release (determine version, create tag & GitHub release)
         id: semrel
