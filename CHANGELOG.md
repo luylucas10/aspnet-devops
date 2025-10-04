@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/luylucas10/aspnet-devops/compare/v1.0.0...v1.0.1) (2025-10-04)
+
+
+### Bug Fixes
+
+* label at home ([eff4c4f](https://github.com/luylucas10/aspnet-devops/commit/eff4c4f4261a55f2bcd0e0213818de43c7bcd7bd))
+
 # 1.0.0 (2025-10-04)
 
 
