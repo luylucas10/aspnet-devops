@@ -1,0 +1,44 @@
+@page "/"
+@inject IHttpClientFactory Http
+
+<PageTitle>Home</PageTitle>
+
+<h1>Hello, world!</h1>
+
+Welcome to your new app.
+
+<div class="mt-4">
+    <input @bind="_name" placeholder="Enter a name" class="form-control" />
+    <button @onclick="GetAge" class="btn btn-primary mt-2">Buscar</button>
+</div>
+
+@if (_ageDetails != null)
+{
+    <div class="mt-4">
+        <h3>Result:</h3>
+        <p>Name: @_ageDetails.Name</p>
+        <p>Age: @_ageDetails.Age</p>
+        <p>Count: @_ageDetails.Count</p>
+    </div>
+}
+
+@code {
+    private string? _name;
+    private AgeDetails? _ageDetails;
+
+    private async Task GetAge()
+    {
+        if (!string.IsNullOrEmpty(_name))
+        {
+            using var httpClient = Http.CreateClient();
+            _ageDetails = await httpClient.GetFromJsonAsync<AgeDetails>($"https://api.agify.io/?name={_name}");
+        }
+    }
+
+    public class AgeDetails
+    {
+        public int Count { get; set; }
+        public string Name { get; set; }
+        public int Age { get; set; }
+    }
+}
