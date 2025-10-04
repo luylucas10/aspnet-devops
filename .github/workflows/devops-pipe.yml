@@ -65,10 +65,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'    # ajuste se preferir outra versão LTS
+          node-version: '22'    # ajuste se preferir outra versão LTS
 
       - name: Install semantic-release
-        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund semantic-release@^19
+        run: npm install --no-audit --no-fund semantic-release@^19
 
       - name: Run semantic-release (determine version, create tag & GitHub release)
         id: semrel
