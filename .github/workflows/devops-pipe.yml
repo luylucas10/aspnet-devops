@@ -1,0 +1,167 @@
+name: .NET + Build & Publish image + Update Helm
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# precisamos de permissões para publicar packages e escrever no repo
+permissions:
+  contents: write    # para poder commitar de volta
+  packages: write    # para publicar imagens no GHCR
+
+env:
+  IMAGE_REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ${{ github.repository_owner }}   # owner/org
+  IMAGE_NAME: ${{ github.event.repository.name }}  # por padrão uso o nome do repo
+  K8S_VALUES: k8s/values.yaml
+  CHART_FILE: k8s/Chart.yaml
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        # necessário para fazer push com GITHUB_TOKEN depois
+        persist-credentials: true
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --no-restore
+
+    - name: Test
+      run: dotnet test --no-build --verbosity normal
+
+    # --- Buildx + login + build & push ---
+    - name: Set up QEMU (for buildx multiarch support)
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v2
+      with:
+        registry: ${{ env.IMAGE_REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Prepare image tags
+      id: tags
+      run: |
+        SHORT_SHA=${GITHUB_SHA::7}
+        IMAGE_TAG=${SHORT_SHA}
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
+        # também exponho a imagem completa como saída
+        echo "IMAGE_FULL=${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/${IMAGE_NAME}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+    - name: Build and push image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./Dockerfile               # ajuste se Dockerfile estiver em outro local
+        push: true
+        platforms: linux/amd64
+        tags: |
+          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.IMAGE_TAG }}
+          ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+        build-args: |
+          DOTNET_ENV=Production
+
+    # --- Atualiza k8s/values.yaml e Chart.yaml ---
+    # Vamos instalar Python + pyyaml e modificar os dois YAMLs com um script pequeno.
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install PyYAML
+      run: python -m pip install --upgrade pip PyYAML
+
+    - name: Update Helm values.yaml and Chart.yaml with new image tag / appVersion
+      id: update_yaml
+      run: |
+        IMAGE_FULL="${{ steps.tags.outputs.IMAGE_FULL }}"
+        IMAGE_TAG="${{ steps.tags.outputs.IMAGE_TAG }}"
+        echo "Updating ${GITHUB_WORKSPACE}/${{ env.K8S_VALUES }} and $GITHUB_WORKSPACE/${{ env.CHART_FILE }}"
+        python - <<'PY'
+        import sys, yaml, pathlib
+        ws = pathlib.Path('.').resolve()
+        
+        values_file = ws / "${{ env.K8S_VALUES }}"
+        chart_file = ws / "${{ env.CHART_FILE }}"
+        
+        image_tag = "${{ steps.tags.outputs.IMAGE_TAG }}"
+        image_full = "${{ steps.tags.outputs.IMAGE_FULL }}"
+        
+        # Load and update values.yaml
+        with open(values_file, 'r', encoding='utf-8') as f:
+            vals = yaml.safe_load(f)
+        
+        # Assumptions: valores comuns
+        #  - imagem pode estar em values under .image.repository / .image.tag
+        #  - ou em .image (map) with name/tag
+        # Tente vários padrões úteis:
+        def set_image(vals):
+            if vals is None:
+                vals = {}
+            # padrão helm comum: image: { repository: "...", tag: "..." }
+            img = vals.get('image')
+            if isinstance(img, dict):
+                # atualizar repository (mantendo formato) e tag
+                # se repository não existir, manter a imagem completa
+                if 'repository' in img:
+                    img['repository'] = image_full.rsplit(":",1)[0]
+                else:
+                    img['repository'] = image_full.rsplit(":",1)[0]
+                img['tag'] = image_tag
+            else:
+                # se image for string, substitui por full image (repository:tag)
+                vals['image'] = image_full
+            vals['image'] = img if isinstance(img, dict) else vals['image']
+            return vals
+        
+        vals = set_image(vals)
+        
+        with open(values_file, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
+        
+        # Update Chart.yaml appVersion
+        with open(chart_file, 'r', encoding='utf-8') as f:
+            chart = yaml.safe_load(f)
+        
+        if chart is None:
+            chart = {}
+        chart['appVersion'] = image_tag
+        
+        with open(chart_file, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
+        
+        print("Updated values.yaml and Chart.yaml")
+        PY
+
+    # --- Commit & push changes back to repo ---
+    - name: Commit and push updated helm files
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add "${{ env.K8S_VALUES }}" "${{ env.CHART_FILE }}" || true
+        # se não houver alteração, git diff --quiet retorna 0, evitamos erro
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "ci: publish image ${{ steps.tags.outputs.IMAGE_TAG }} and update Helm values"
+          git push origin HEAD:${{ github.ref_name }}
+        fi
