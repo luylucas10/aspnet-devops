@@ -70,7 +70,7 @@ jobs:
       - name: Install semantic-release + plugins
         run: |
           npm install --no-audit --no-fund \
-            semantic-release@^19 \
+            semantic-release \
             @semantic-release/commit-analyzer \
             @semantic-release/release-notes-generator \
             @semantic-release/changelog \
