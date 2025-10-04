@@ -148,7 +148,7 @@ jobs:
   # 4) Update Helm values & Chart and commit back
   # ------------------------------
   update-helm-and-commit:
-    needs: build-and-push-image
+    needs: [build-and-push-image, semantic-release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (with write perms)
@@ -162,20 +162,20 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Debug env & files
-        run: |
-          echo "REF_NAME=${{ github.ref_name }}"
-          echo "IMAGE_TAG (from semantic-release) = '${{ needs.semantic-release.outputs.IMAGE_TAG }}'"
-          echo "IMAGE_FULL = '${{ needs.semantic-release.outputs.IMAGE_FULL }}'"
-          echo "---- k8s/values.yaml BEFORE ----"
-          sed -n '1,200p' k8s/values.yaml || echo "(no file)"
-        shell: bash
-      
-      - name: Sync with remote branch (include commits from semantic-release)
-        run: |
-          git fetch origin +refs/heads/${{ github.ref_name }}:refs/remotes/origin/${{ github.ref_name }} --tags
-          git reset --hard origin/${{ github.ref_name }}
-        shell: bash
+#      - name: Debug env & files
+#        run: |
+#          echo "REF_NAME=${{ github.ref_name }}"
+#          echo "IMAGE_TAG (from semantic-release) = '${{ needs.semantic-release.outputs.IMAGE_TAG }}'"
+#          echo "IMAGE_FULL = '${{ needs.semantic-release.outputs.IMAGE_FULL }}'"
+#          echo "---- k8s/values.yaml BEFORE ----"
+#          sed -n '1,200p' k8s/values.yaml || echo "(no file)"
+#        shell: bash
+#      
+#      - name: Sync with remote branch (include commits from semantic-release)
+#        run: |
+#          git fetch origin +refs/heads/${{ github.ref_name }}:refs/remotes/origin/${{ github.ref_name }} --tags
+#          git reset --hard origin/${{ github.ref_name }}
+#        shell: bash
       
 
       - name: Install PyYAML
@@ -199,12 +199,12 @@ jobs:
             --image-tag "${IMAGE_TAG}"
         shell: bash
   
-      - name: Show resulting files (for debug)
-        run: |
-          echo "----- k8s/values.yaml -----"
-          sed -n '1,400p' "${{ env.K8S_VALUES }}" || true
-          echo "----- k8s/Chart.yaml -----"
-          sed -n '1,200p' "${{ env.CHART_FILE }}" || true
+#      - name: Show resulting files (for debug)
+#        run: |
+#          echo "----- k8s/values.yaml -----"
+#          sed -n '1,400p' "${{ env.K8S_VALUES }}" || true
+#          echo "----- k8s/Chart.yaml -----"
+#          sed -n '1,200p' "${{ env.CHART_FILE }}" || true
   
       - name: Commit and push updated helm files
         env:
