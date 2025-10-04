@@ -171,43 +171,59 @@ jobs:
           IMAGE_FULL="${{ needs.semantic-release.outputs.IMAGE_FULL }}"
           echo "Updating ${K8S_VALUES} and ${CHART_FILE} -> ${IMAGE_TAG}"
           python - <<'PY'
-          import yaml, pathlib
+          import sys, yaml, pathlib
           ws = pathlib.Path('.').resolve()
+          
           values_file = ws / "${{ env.K8S_VALUES }}"
           chart_file = ws / "${{ env.CHART_FILE }}"
-          image_tag = "${{ needs.semantic-release.outputs.IMAGE_TAG }}"
+          
+          image_tag = "$${{ needs.semantic-release.outputs.IMAGE_TAG }}"
           image_full = "${{ needs.semantic-release.outputs.IMAGE_FULL }}"
           
-          # Load values
-          vals = {}
-          if values_file.exists():
-            with open(values_file, 'r', encoding='utf-8') as f:
-              vals = yaml.safe_load(f) or {}
+          # Load and update values.yaml
+          with open(values_file, 'r', encoding='utf-8') as f:
+            vals = yaml.safe_load(f)
           
-          # Update image block
+          # Assumptions: valores comuns
+          #  - imagem pode estar em values under .image.repository / .image.tag
+          #  - ou em .image (map) with name/tag
+          # Tente vários padrões úteis:
+          def set_image(vals):
+            if vals is None:
+              vals = {}
+            # padrão helm comum: image: { repository: "...", tag: "..." }
             img = vals.get('image')
-          if isinstance(img, dict):
-            repo = image_full.rsplit(':', 1)[0]
-            img['repository'] = repo
-            img['tag'] = image_tag
-            vals['image'] = img
-          else:
-            # set as full image string
-            vals['image'] = image_full
+            if isinstance(img, dict):
+              # atualizar repository (mantendo formato) e tag
+              # se repository não existir, manter a imagem completa
+              if 'repository' in img:
+                img['repository'] = image_full.rsplit(":",1)[0]
+              else:
+                img['repository'] = image_full.rsplit(":",1)[0]
+              img['tag'] = image_tag
+            else:
+              # se image for string, substitui por full image (repository:tag)
+              vals['image'] = image_full
+            vals['image'] = img if isinstance(img, dict) else vals['image']
+            return vals
+          
+          vals = set_image(vals)
           
           with open(values_file, 'w', encoding='utf-8') as f:
             yaml.safe_dump(vals, f, sort_keys=False, allow_unicode=True)
           
           # Update Chart.yaml appVersion
+          with open(chart_file, 'r', encoding='utf-8') as f:
+            chart = yaml.safe_load(f)
+          
+          if chart is None:
             chart = {}
-          if chart_file.exists():
-            with open(chart_file, 'r', encoding='utf-8') as f:
-              chart = yaml.safe_load(f) or {}
-            chart['appVersion'] = image_tag
+          chart['appVersion'] = image_tag
+          
           with open(chart_file, 'w', encoding='utf-8') as f:
             yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
-            
-            print("Updated helm files")
+          
+          print("Updated values.yaml and Chart.yaml")
           PY
 
       - name: Commit and push updated helm files
