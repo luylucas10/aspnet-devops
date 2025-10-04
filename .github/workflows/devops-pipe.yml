@@ -170,7 +170,7 @@ jobs:
           IMAGE_TAG="${{ needs.semantic-release.outputs.IMAGE_TAG }}"
           IMAGE_FULL="${{ needs.semantic-release.outputs.IMAGE_FULL }}"
           echo "Updating ${K8S_VALUES} and ${CHART_FILE} -> ${IMAGE_TAG}"
-          python - <<'PY'
+          python - <<EOF
           import yaml, pathlib
           ws = pathlib.Path('.').resolve()
           values_file = ws / "${{ env.K8S_VALUES }}"
@@ -205,10 +205,9 @@ jobs:
               chart = yaml.safe_load(f) or {}
             chart['appVersion'] = image_tag
           with open(chart_file, 'w', encoding='utf-8') as f:
-            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)
-            
+            yaml.safe_dump(chart, f, sort_keys=False, allow_unicode=True)            
             print("Updated helm files")
-          PY
+          EOF
 
       - name: Commit and push updated helm files
         run: |
