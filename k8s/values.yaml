@@ -21,13 +21,15 @@ service:
 ingress:
   enabled: false
   className: ''
-  annotations: {}
+  annotations:
+    "cert-manager.io/cluster-issuer" : "letsencrypt-staging"
   hosts:
-  - host: chart-example.local
+  - host: aspnet-devops.mangotecnologia.com.br
     paths:
     - path: /
       pathType: ImplementationSpecific
-  tls: []
+  tls:
+    - secretName: aspnet-devops-tls
 httpRoute:
   enabled: false
   annotations: {}
