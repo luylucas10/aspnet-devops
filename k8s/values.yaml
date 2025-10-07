@@ -20,7 +20,7 @@ service:
   port: 8080
 ingress:
   enabled: true
-  className: 'nginx'
+  className: nginx
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-staging
   hosts:
