@@ -2,7 +2,7 @@ replicaCount: 1
 image:
   repository: ghcr.io/luylucas10/aspnet-devops
   pullPolicy: IfNotPresent
-  tag: 1.0.1
+  tag: 1.0.0
 imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
@@ -22,14 +22,14 @@ ingress:
   enabled: false
   className: ''
   annotations:
-    "cert-manager.io/cluster-issuer" : "letsencrypt-staging"
+    cert-manager.io/cluster-issuer: letsencrypt-staging
   hosts:
   - host: aspnet-devops.mangotecnologia.com.br
     paths:
     - path: /
       pathType: ImplementationSpecific
   tls:
-    - secretName: aspnet-devops-tls
+  - secretName: aspnet-devops-tls
 httpRoute:
   enabled: false
   annotations: {}
