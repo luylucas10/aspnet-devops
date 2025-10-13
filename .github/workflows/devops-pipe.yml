@@ -195,6 +195,7 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "chore(release): update Helm to ${IMAGE_TAG}"
+            git config pull.rebase false
             git pull
             git push origin HEAD:${{ github.ref_name }}
           fi
