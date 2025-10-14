@@ -1,4 +1,4 @@
-replicaCount: 5
+replicaCount: 1
 image:
   repository: ghcr.io/luylucas10/aspnet-devops
   pullPolicy: IfNotPresent
