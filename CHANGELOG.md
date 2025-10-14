@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/luylucas10/aspnet-devops/compare/v1.0.3...v1.0.4) (2025-10-14)
+
+
+### Bug Fixes
+
+* update welcome message in Home.razor to reflect version change to V4 ([aaf51f4](https://github.com/luylucas10/aspnet-devops/commit/aaf51f4937602cb046ddaeb6849feedd8d14cdc8))
+
 ## [1.0.3](https://github.com/luylucas10/aspnet-devops/compare/v1.0.2...v1.0.3) (2025-10-13)
 
 
