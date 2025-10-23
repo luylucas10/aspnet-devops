@@ -2,7 +2,7 @@ replicaCount: 3
 image:
   repository: ghcr.io/luylucas10/aspnet-devops
   pullPolicy: IfNotPresent
-  tag: 1.0.5
+  tag: 1.0.6
 imagePullSecrets: []
 nameOverride: ''
 fullnameOverride: ''
