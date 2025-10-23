@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/luylucas10/aspnet-devops/compare/v1.0.5...v1.0.6) (2025-10-23)
+
+
+### Bug Fixes
+
+* version ([9fad9ed](https://github.com/luylucas10/aspnet-devops/commit/9fad9edaab6a6b70c803fa9e07390fefffba50b4))
+
 ## [1.0.5](https://github.com/luylucas10/aspnet-devops/compare/v1.0.4...v1.0.5) (2025-10-22)
 
 
